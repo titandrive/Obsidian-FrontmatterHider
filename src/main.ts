@@ -27,14 +27,13 @@ export default class FrontmatterHiderPlugin extends Plugin {
 	ribbonIconEl: HTMLElement;
 
 	async onload(): Promise<void> {
-		console.log("Frontmatter Hider: plugin loading");
+
 		await this.loadSettings();
 
 		this.ribbonIconEl = this.addRibbonIcon(
 			ICON_VISIBLE,
 			TOOLTIP_HIDE,
 			() => {
-				console.log("Frontmatter Hider: ribbon icon clicked");
 				this.toggleFrontmatter();
 			}
 		);

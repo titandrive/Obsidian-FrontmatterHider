@@ -1,0 +1,27 @@
+/* Reading mode — hide metadata/properties container */
+.frontmatter-hidden-reading .markdown-reading-view .metadata-container {
+	display: none !important;
+}
+
+/* Live Preview — hide properties UI */
+.frontmatter-hidden-livepreview .markdown-source-view.is-live-preview .metadata-container {
+	display: none !important;
+}
+
+/* Live Preview — hide frontmatter lines in CodeMirror */
+.frontmatter-hidden-livepreview .markdown-source-view.is-live-preview .cm-line:has(.cm-hmd-frontmatter) {
+	display: none !important;
+}
+
+.frontmatter-hidden-livepreview .markdown-source-view.is-live-preview .cm-line.HyperMD-frontmatter {
+	display: none !important;
+}
+
+/* Source mode — hide frontmatter lines in CodeMirror */
+.frontmatter-hidden-source .markdown-source-view:not(.is-live-preview) .cm-line:has(.cm-hmd-frontmatter) {
+	display: none !important;
+}
+
+.frontmatter-hidden-source .markdown-source-view:not(.is-live-preview) .cm-line.HyperMD-frontmatter {
+	display: none !important;
+}

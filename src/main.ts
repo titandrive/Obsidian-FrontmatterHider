@@ -1,4 +1,4 @@
-import { MarkdownView, Menu, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, setIcon } from "obsidian";
+import { MarkdownView, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, setIcon } from "obsidian";
 import {
 	FrontmatterHiderSettings,
 	DEFAULT_SETTINGS,
@@ -25,6 +25,7 @@ const ALL_CLASSES = [
 export default class FrontmatterHiderPlugin extends Plugin {
 	settings: FrontmatterHiderSettings;
 	ribbonIconEl: HTMLElement;
+	private explorerObserver: MutationObserver | null = null;
 
 	async onload(): Promise<void> {
 
@@ -54,6 +55,15 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		);
 
 		this.registerEvent(
+			this.app.metadataCache.on("changed", (file) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view?.file?.path === file.path) {
+					this.updateRibbonIcon();
+				}
+			})
+		);
+
+		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {
 				if (this.settings.hiddenFiles[oldPath]) {
 					this.settings.hiddenFiles[file.path] = true;
@@ -77,6 +87,11 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			this.app.workspace.on("file-menu", (menu, file) => {
 				const mdFiles = this.getMarkdownFiles([file]);
 				if (mdFiles.length === 0) return;
+
+				const filesWithFrontmatter = mdFiles.filter((f) =>
+					this.fileHasFrontmatter(f)
+				);
+				if (filesWithFrontmatter.length === 0) return;
 
 				const allHidden = mdFiles.every(
 					(f) => this.settings.hiddenFiles[f.path] === true
@@ -105,6 +120,11 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			this.app.workspace.on("files-menu", (menu, files) => {
 				const mdFiles = this.getMarkdownFiles(files);
 				if (mdFiles.length === 0) return;
+
+				const filesWithFrontmatter = mdFiles.filter((f) =>
+					this.fileHasFrontmatter(f)
+				);
+				if (filesWithFrontmatter.length === 0) return;
 
 				const allHidden = mdFiles.every(
 					(f) => this.settings.hiddenFiles[f.path] === true
@@ -156,11 +176,13 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			this.refreshAllLeaves();
 			this.updateRibbonIcon();
 			this.updateRibbonVisibility();
+			this.observeExplorerSelection();
 		});
 	}
 
 	onunload(): void {
 		this.removeAllClasses();
+		this.explorerObserver?.disconnect();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -185,6 +207,17 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		const path = this.getActiveFilePath();
 		if (!path) return false;
 		return this.settings.hiddenFiles[path] === true;
+	}
+
+	private fileHasFrontmatter(file: TFile): boolean {
+		const cache = this.app.metadataCache.getFileCache(file);
+		return !!cache?.frontmatter;
+	}
+
+	private activeFileHasFrontmatter(): boolean | null {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file) return null; // no markdown view active
+		return this.fileHasFrontmatter(view.file);
 	}
 
 	private getExplorerSelectedFiles(): TFile[] {
@@ -252,12 +285,51 @@ export default class FrontmatterHiderPlugin extends Plugin {
 	}
 
 	private updateRibbonIcon(): void {
-		const hidden = this.isCurrentNoteHidden();
+		const explorerFiles = this.getExplorerSelectedFiles();
+		let disabled: boolean;
+		let hidden: boolean;
+		if (explorerFiles.length > 0) {
+			disabled = !explorerFiles.some((f) => this.fileHasFrontmatter(f));
+			hidden = explorerFiles.every(
+				(f) => this.settings.hiddenFiles[f.path] === true
+			);
+		} else {
+			const hasFrontmatter = this.activeFileHasFrontmatter();
+			disabled = hasFrontmatter === false;
+			hidden = this.isCurrentNoteHidden();
+		}
 		setIcon(this.ribbonIconEl, hidden ? ICON_HIDDEN : ICON_VISIBLE);
-		this.ribbonIconEl.setAttribute(
-			"aria-label",
-			hidden ? TOOLTIP_SHOW : TOOLTIP_HIDE
+		if (disabled) {
+			this.ribbonIconEl.setAttribute(
+				"aria-label",
+				"No frontmatter present"
+			);
+		} else {
+			this.ribbonIconEl.setAttribute(
+				"aria-label",
+				hidden ? TOOLTIP_SHOW : TOOLTIP_HIDE
+			);
+		}
+		this.ribbonIconEl.toggleClass(
+			"frontmatter-hider-disabled",
+			disabled
 		);
+	}
+
+	private observeExplorerSelection(): void {
+		const explorerLeaf =
+			this.app.workspace.getLeavesOfType("file-explorer")[0];
+		if (!explorerLeaf) return;
+
+		const containerEl = explorerLeaf.view.containerEl;
+		this.explorerObserver = new MutationObserver(() => {
+			this.updateRibbonIcon();
+		});
+		this.explorerObserver.observe(containerEl, {
+			attributes: true,
+			attributeFilter: ["class"],
+			subtree: true,
+		});
 	}
 
 	private applyClassToLeaf(leaf: WorkspaceLeaf): void {

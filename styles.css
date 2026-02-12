@@ -1,3 +1,9 @@
+/* Greyed-out ribbon icon when active note has no frontmatter */
+.frontmatter-hider-disabled {
+	opacity: 0.3;
+	pointer-events: none;
+}
+
 /* Reading mode — hide metadata/properties container */
 .frontmatter-hidden-reading .markdown-reading-view .metadata-container {
 	display: none !important;

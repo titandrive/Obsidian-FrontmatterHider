@@ -1,0 +1,321 @@
+import { MarkdownView, Menu, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, setIcon } from "obsidian";
+import {
+	FrontmatterHiderSettings,
+	DEFAULT_SETTINGS,
+	FrontmatterHiderSettingTab,
+} from "./settings";
+import {
+	FRONTMATTER_HIDDEN_CLASS,
+	FRONTMATTER_HIDDEN_SOURCE_CLASS,
+	FRONTMATTER_HIDDEN_LIVE_PREVIEW_CLASS,
+	FRONTMATTER_HIDDEN_READING_CLASS,
+	ICON_VISIBLE,
+	ICON_HIDDEN,
+	TOOLTIP_SHOW,
+	TOOLTIP_HIDE,
+} from "./constants";
+
+const ALL_CLASSES = [
+	FRONTMATTER_HIDDEN_CLASS,
+	FRONTMATTER_HIDDEN_SOURCE_CLASS,
+	FRONTMATTER_HIDDEN_LIVE_PREVIEW_CLASS,
+	FRONTMATTER_HIDDEN_READING_CLASS,
+];
+
+export default class FrontmatterHiderPlugin extends Plugin {
+	settings: FrontmatterHiderSettings;
+	ribbonIconEl: HTMLElement;
+
+	async onload(): Promise<void> {
+		console.log("Frontmatter Hider: plugin loading");
+		await this.loadSettings();
+
+		this.ribbonIconEl = this.addRibbonIcon(
+			ICON_VISIBLE,
+			TOOLTIP_HIDE,
+			() => {
+				console.log("Frontmatter Hider: ribbon icon clicked");
+				this.toggleFrontmatter();
+			}
+		);
+
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				this.updateRibbonIcon();
+				if (leaf) {
+					this.applyClassToLeaf(leaf);
+				}
+			})
+		);
+
+		this.registerEvent(
+			this.app.workspace.on("layout-change", () => {
+				this.refreshAllLeaves();
+			})
+		);
+
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				if (this.settings.hiddenFiles[oldPath]) {
+					this.settings.hiddenFiles[file.path] = true;
+					delete this.settings.hiddenFiles[oldPath];
+					this.saveSettings();
+				}
+			})
+		);
+
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				if (this.settings.hiddenFiles[file.path]) {
+					delete this.settings.hiddenFiles[file.path];
+					this.saveSettings();
+				}
+			})
+		);
+
+		// Single file/folder context menu
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				const mdFiles = this.getMarkdownFiles([file]);
+				if (mdFiles.length === 0) return;
+
+				const allHidden = mdFiles.every(
+					(f) => this.settings.hiddenFiles[f.path] === true
+				);
+				menu.addItem((item) => {
+					item.setTitle(allHidden ? "Show frontmatter" : "Hide frontmatter")
+						.setIcon(allHidden ? ICON_VISIBLE : ICON_HIDDEN)
+						.onClick(async () => {
+							for (const f of mdFiles) {
+								if (allHidden) {
+									delete this.settings.hiddenFiles[f.path];
+								} else {
+									this.settings.hiddenFiles[f.path] = true;
+								}
+							}
+							await this.saveSettings();
+							this.updateRibbonIcon();
+							this.refreshAllLeaves();
+						});
+				});
+			})
+		);
+
+		// Multi-file context menu
+		this.registerEvent(
+			this.app.workspace.on("files-menu", (menu, files) => {
+				const mdFiles = this.getMarkdownFiles(files);
+				if (mdFiles.length === 0) return;
+
+				const allHidden = mdFiles.every(
+					(f) => this.settings.hiddenFiles[f.path] === true
+				);
+
+				menu.addItem((item) => {
+					item.setTitle(
+						allHidden
+							? "Show frontmatter"
+							: "Hide frontmatter"
+					)
+						.setIcon(allHidden ? ICON_VISIBLE : ICON_HIDDEN)
+						.onClick(async () => {
+							for (const f of mdFiles) {
+								if (allHidden) {
+									delete this.settings.hiddenFiles[f.path];
+								} else {
+									this.settings.hiddenFiles[f.path] = true;
+								}
+							}
+							await this.saveSettings();
+							this.updateRibbonIcon();
+							this.refreshAllLeaves();
+						});
+				});
+			})
+		);
+
+		this.addSettingTab(new FrontmatterHiderSettingTab(this.app, this));
+
+		this.addCommand({
+			id: "toggle-frontmatter-visibility",
+			name: "Toggle frontmatter visibility",
+			checkCallback: (checking: boolean) => {
+				const hasExplorerSelection =
+					this.getExplorerSelectedFiles().length > 0;
+				const hasActiveNote = !!this.getActiveFilePath();
+				if (hasExplorerSelection || hasActiveNote) {
+					if (!checking) {
+						this.toggleFrontmatter();
+					}
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.app.workspace.onLayoutReady(() => {
+			this.refreshAllLeaves();
+			this.updateRibbonIcon();
+			this.updateRibbonVisibility();
+		});
+	}
+
+	onunload(): void {
+		this.removeAllClasses();
+	}
+
+	async loadSettings(): Promise<void> {
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
+	}
+
+	async saveSettings(): Promise<void> {
+		await this.saveData(this.settings);
+	}
+
+	private getActiveFilePath(): string | null {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file) return null;
+		return view.file.path;
+	}
+
+	private isCurrentNoteHidden(): boolean {
+		const path = this.getActiveFilePath();
+		if (!path) return false;
+		return this.settings.hiddenFiles[path] === true;
+	}
+
+	private getExplorerSelectedFiles(): TFile[] {
+		const explorerLeaf =
+			this.app.workspace.getLeavesOfType("file-explorer")[0];
+		if (!explorerLeaf) return [];
+
+		const containerEl = explorerLeaf.view.containerEl;
+		const selectedEls = containerEl.querySelectorAll(
+			".tree-item-self.is-selected"
+		);
+		if (selectedEls.length === 0) return [];
+
+		const items: TAbstractFile[] = [];
+		for (const el of Array.from(selectedEls)) {
+			const path = (el as HTMLElement).dataset.path;
+			if (path) {
+				const file = this.app.vault.getAbstractFileByPath(path);
+				if (file) items.push(file);
+			}
+		}
+
+		return this.getMarkdownFiles(items);
+	}
+
+	private async toggleFrontmatter(): Promise<void> {
+		// Check file explorer selection first
+		const explorerFiles = this.getExplorerSelectedFiles();
+		if (explorerFiles.length > 0) {
+			const allHidden = explorerFiles.every(
+				(f) => this.settings.hiddenFiles[f.path] === true
+			);
+			for (const f of explorerFiles) {
+				if (allHidden) {
+					delete this.settings.hiddenFiles[f.path];
+				} else {
+					this.settings.hiddenFiles[f.path] = true;
+				}
+			}
+			await this.saveSettings();
+			this.updateRibbonIcon();
+			this.refreshAllLeaves();
+			return;
+		}
+
+		// Fall back to active note
+		const path = this.getActiveFilePath();
+		if (!path) return;
+
+		if (this.settings.hiddenFiles[path]) {
+			delete this.settings.hiddenFiles[path];
+		} else {
+			this.settings.hiddenFiles[path] = true;
+		}
+
+		await this.saveSettings();
+		this.updateRibbonIcon();
+		this.refreshAllLeaves();
+	}
+
+	updateRibbonVisibility(): void {
+		this.ribbonIconEl.style.display = this.settings.showRibbonIcon
+			? ""
+			: "none";
+	}
+
+	private updateRibbonIcon(): void {
+		const hidden = this.isCurrentNoteHidden();
+		setIcon(this.ribbonIconEl, hidden ? ICON_HIDDEN : ICON_VISIBLE);
+		this.ribbonIconEl.setAttribute(
+			"aria-label",
+			hidden ? TOOLTIP_SHOW : TOOLTIP_HIDE
+		);
+	}
+
+	private applyClassToLeaf(leaf: WorkspaceLeaf): void {
+		const view = leaf.view;
+		if (!(view instanceof MarkdownView)) return;
+
+		const filePath = view.file?.path;
+		const containerEl = view.contentEl;
+		if (!filePath || !containerEl) return;
+
+		const isHidden = this.settings.hiddenFiles[filePath] === true;
+
+		containerEl.classList.remove(...ALL_CLASSES);
+
+		if (!isHidden) return;
+
+		containerEl.classList.add(FRONTMATTER_HIDDEN_CLASS);
+
+		if (this.settings.hideSource) {
+			containerEl.classList.add(FRONTMATTER_HIDDEN_SOURCE_CLASS);
+		}
+		if (this.settings.hideLivePreview) {
+			containerEl.classList.add(FRONTMATTER_HIDDEN_LIVE_PREVIEW_CLASS);
+		}
+		if (this.settings.hideReading) {
+			containerEl.classList.add(FRONTMATTER_HIDDEN_READING_CLASS);
+		}
+	}
+
+	refreshAllLeaves(): void {
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			this.applyClassToLeaf(leaf);
+		});
+	}
+
+	private getMarkdownFiles(items: TAbstractFile[]): TFile[] {
+		const files: TFile[] = [];
+		for (const item of items) {
+			if (item instanceof TFile && item.extension === "md") {
+				files.push(item);
+			} else if (item instanceof TFolder) {
+				this.app.vault.getMarkdownFiles().forEach((f) => {
+					if (f.path.startsWith(item.path + "/")) {
+						files.push(f);
+					}
+				});
+			}
+		}
+		return files;
+	}
+
+	private removeAllClasses(): void {
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (view instanceof MarkdownView && view.contentEl) {
+				view.contentEl.classList.remove(...ALL_CLASSES);
+			}
+		});
+	}
+}

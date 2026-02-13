@@ -232,6 +232,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			}
 			// Track when we save to avoid reloading our own changes
 			this.lastSaveTime = Date.now();
+			console.log("Frontmatter Hider: Saving to custom file", customFile);
 			// Save hiddenFiles to custom vault file
 			await this.app.vault.adapter.write(
 				customFile,
@@ -249,16 +250,25 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		const customFile = this.getCustomFilePath();
 		if (!customFile) return;
 
+		console.log("Frontmatter Hider: Watching for changes to", customFile);
+
+		// Watch for file modifications
 		this.registerEvent(
 			this.app.vault.on("modify", async (file) => {
 				if (!(file instanceof TFile)) return;
 				if (file.path !== customFile) return;
 
-				// Ignore changes we just made ourselves (within 1 second)
+				console.log("Frontmatter Hider: Detected file modification");
+
+				// Ignore changes we just made ourselves (within 500ms)
 				const timeSinceLastSave = Date.now() - this.lastSaveTime;
-				if (timeSinceLastSave < 1000) return;
+				if (timeSinceLastSave < 500) {
+					console.log("Frontmatter Hider: Ignoring self-made change (saved", timeSinceLastSave, "ms ago)");
+					return;
+				}
 
 				// File was modified by sync from another device - reload it
+				console.log("Frontmatter Hider: Reloading data from synced file");
 				try {
 					const raw = await this.app.vault.adapter.read(customFile);
 					const data = JSON.parse(raw);
@@ -266,9 +276,32 @@ export default class FrontmatterHiderPlugin extends Plugin {
 						this.settings.hiddenFiles = data;
 						this.refreshAllLeaves();
 						this.updateRibbonIcon();
+						console.log("Frontmatter Hider: Successfully reloaded synced data");
 					}
 				} catch (e) {
 					console.error("Frontmatter Hider: Failed to reload synced data", e);
+				}
+			})
+		);
+
+		// Also watch for file creation (in case sync creates it)
+		this.registerEvent(
+			this.app.vault.on("create", async (file) => {
+				if (!(file instanceof TFile)) return;
+				if (file.path !== customFile) return;
+
+				console.log("Frontmatter Hider: Detected file creation from sync");
+				try {
+					const raw = await this.app.vault.adapter.read(customFile);
+					const data = JSON.parse(raw);
+					if (data && typeof data === "object") {
+						this.settings.hiddenFiles = data;
+						this.refreshAllLeaves();
+						this.updateRibbonIcon();
+						console.log("Frontmatter Hider: Loaded data from newly synced file");
+					}
+				} catch (e) {
+					console.error("Frontmatter Hider: Failed to load data from new file", e);
 				}
 			})
 		);

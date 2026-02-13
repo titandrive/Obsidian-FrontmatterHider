@@ -1,7 +1,7 @@
 {
 	"id": "frontmatter-hider",
 	"name": "Frontmatter Hider",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"minAppVersion": "1.0.0",
 	"description": "Toggle frontmatter visibility per note with a ribbon button.",
 	"author": "Jake",

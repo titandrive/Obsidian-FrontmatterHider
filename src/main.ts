@@ -26,6 +26,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 	settings: FrontmatterHiderSettings;
 	ribbonIconEl: HTMLElement;
 	private explorerObserver: MutationObserver | null = null;
+	private lastSaveTime: number = 0;
 
 	async onload(): Promise<void> {
 
@@ -177,6 +178,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			this.updateRibbonIcon();
 			this.updateRibbonVisibility();
 			this.observeExplorerSelection();
+			this.watchCustomDataFile();
 		});
 	}
 
@@ -228,6 +230,8 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			if (!dirExists) {
 				await this.app.vault.adapter.mkdir(dir);
 			}
+			// Track when we save to avoid reloading our own changes
+			this.lastSaveTime = Date.now();
 			// Save hiddenFiles to custom vault file
 			await this.app.vault.adapter.write(
 				customFile,
@@ -239,6 +243,35 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		} else {
 			await this.saveData(this.settings);
 		}
+	}
+
+	private watchCustomDataFile(): void {
+		const customFile = this.getCustomFilePath();
+		if (!customFile) return;
+
+		this.registerEvent(
+			this.app.vault.on("modify", async (file) => {
+				if (!(file instanceof TFile)) return;
+				if (file.path !== customFile) return;
+
+				// Ignore changes we just made ourselves (within 1 second)
+				const timeSinceLastSave = Date.now() - this.lastSaveTime;
+				if (timeSinceLastSave < 1000) return;
+
+				// File was modified by sync from another device - reload it
+				try {
+					const raw = await this.app.vault.adapter.read(customFile);
+					const data = JSON.parse(raw);
+					if (data && typeof data === "object") {
+						this.settings.hiddenFiles = data;
+						this.refreshAllLeaves();
+						this.updateRibbonIcon();
+					}
+				} catch (e) {
+					console.error("Frontmatter Hider: Failed to reload synced data", e);
+				}
+			})
+		);
 	}
 
 	async migrateDataFile(

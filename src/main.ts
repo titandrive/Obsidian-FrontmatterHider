@@ -185,16 +185,117 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		this.explorerObserver?.disconnect();
 	}
 
+	private static readonly DATA_FILENAME = "frontmatter-hider.json";
+
+	private getCustomFilePath(): string | null {
+		if (!this.settings.customDataPath) return null;
+		return `${this.settings.customDataPath}/${FrontmatterHiderPlugin.DATA_FILENAME}`;
+	}
+
 	async loadSettings(): Promise<void> {
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+
+		// If custom data path is set, load hiddenFiles from vault file
+		const customFile = this.getCustomFilePath();
+		if (customFile) {
+			try {
+				const exists =
+					await this.app.vault.adapter.exists(customFile);
+				if (exists) {
+					const raw =
+						await this.app.vault.adapter.read(customFile);
+					const data = JSON.parse(raw);
+					if (data && typeof data === "object") {
+						this.settings.hiddenFiles = data;
+					}
+				}
+			} catch {
+				// File missing or invalid JSON — use default empty
+			}
+		}
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		const customFile = this.getCustomFilePath();
+		if (customFile) {
+			// Ensure the directory exists
+			const dir = this.settings.customDataPath;
+			const dirExists = await this.app.vault.adapter.exists(dir);
+			if (!dirExists) {
+				await this.app.vault.adapter.mkdir(dir);
+			}
+			// Save hiddenFiles to custom vault file
+			await this.app.vault.adapter.write(
+				customFile,
+				JSON.stringify(this.settings.hiddenFiles, null, "\t")
+			);
+			// Save plugin settings (without hiddenFiles) to default data.json
+			const { hiddenFiles, ...rest } = this.settings;
+			await this.saveData(rest);
+		} else {
+			await this.saveData(this.settings);
+		}
+	}
+
+	async migrateDataFile(
+		oldDir: string,
+		newDir: string
+	): Promise<void> {
+		const data = JSON.stringify(
+			this.settings.hiddenFiles,
+			null,
+			"\t"
+		);
+
+		// Write to new location
+		if (newDir) {
+			const newFile = `${newDir}/${FrontmatterHiderPlugin.DATA_FILENAME}`;
+			const dirExists = await this.app.vault.adapter.exists(newDir);
+			if (dirExists) {
+				// If a file (not folder) exists at this path, remove it first
+				const stat = await this.app.vault.adapter.stat(newDir);
+				if (stat && stat.type === "file") {
+					await this.app.vault.adapter.remove(newDir);
+					await this.app.vault.adapter.mkdir(newDir);
+				}
+			} else {
+				await this.app.vault.adapter.mkdir(newDir);
+			}
+
+			// If the file already exists (e.g. synced from another device),
+			// load from it instead of overwriting
+			if (await this.app.vault.adapter.exists(newFile)) {
+				try {
+					const raw =
+						await this.app.vault.adapter.read(newFile);
+					const existing = JSON.parse(raw);
+					if (existing && typeof existing === "object") {
+						this.settings.hiddenFiles = existing;
+						return;
+					}
+				} catch {
+					// Invalid JSON — overwrite with current data
+				}
+			}
+
+			await this.app.vault.adapter.write(newFile, data);
+		}
+
+		// Clean up old custom file if it existed
+		if (oldDir && oldDir !== newDir) {
+			const oldFile = `${oldDir}/${FrontmatterHiderPlugin.DATA_FILENAME}`;
+			try {
+				if (await this.app.vault.adapter.exists(oldFile)) {
+					await this.app.vault.adapter.remove(oldFile);
+				}
+			} catch {
+				// Ignore cleanup errors
+			}
+		}
 	}
 
 	private getActiveFilePath(): string | null {

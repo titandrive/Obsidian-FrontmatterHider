@@ -4,6 +4,17 @@
 	pointer-events: none;
 }
 
+/* Settings tab layout */
+.frontmatter-hider-settings .setting-item-heading {
+	margin-bottom: var(--size-2-1);
+}
+
+.frontmatter-hider-settings .setting-item-heading + p.setting-item-description {
+	padding-left: var(--size-4-4);
+	margin-top: 0;
+	margin-bottom: var(--size-2-1);
+}
+
 /* Reading mode — hide metadata/properties container */
 .frontmatter-hidden-reading .markdown-reading-view .metadata-container {
 	display: none !important;

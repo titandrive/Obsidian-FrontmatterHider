@@ -54,6 +54,44 @@ Frontmatter Hider works without any configuration. There are only a few settings
 - **Live Preview:** Whether to hide frontmatter in live preview mode (Default: on)
 - **Reading mode:** Whether to hide frontmatter in reading mode (Default: on)
 - **Show ribbon icon:** Show/hide the toggle button in the left ribbon (Default: on)
+- **Custom data folder:** Optional folder path for storing hidden files data (for cross-device sync)
+
+## Cross-Device Sync
+
+Frontmatter Hider supports automatic cross-device sync, allowing your hidden frontmatter preferences to stay in sync across all your devices.
+
+### Default Behavior
+
+By default, your preferences are stored in `.obsidian/plugins/frontmatter-hider/data.json`. This works great if you are just using the plugin on one device but does not support cross-device sync. If you would like to set that up, so your frontmatter is hidden wherever you access Obsidian, see below. 
+
+### Setup Cross-Device Sync
+
+To sync your hidden frontmatter preferences across devices, specify a custom folder to store your data:
+
+1. **Open Settings** → Frontmatter Hider → Data storage
+2. **Enter a folder path** (e.g., `_data/frontmatter-hider` or `apps/hider`)
+3. **Click Save**
+
+Make sure you do this on each device you would like to sync, using the same folder on each device. 
+
+The plugin will create a `frontmatter-hider.json` file in your specified folder and automatically detect changes from other devices.
+
+### Requirements for Obsidian Sync
+
+**Important:** If you are wishing to sync Frontmatter Hider with Obsidian Sync, make sure you enable `sync all other types` otherwise the .json file will not be synced:
+
+1. Open **Settings → Sync 
+2. Enable **"Sync all other types"** 
+3. Wait for sync to complete
+
+Once enabled, your hidden frontmatter preferences will automatically sync across all devices in real-time.
+
+### How It Works
+
+- When you hide/show frontmatter on one device, it saves to the JSON file
+- The plugin watches for file changes from sync
+- When changes are detected, it automatically reloads and applies them
+- No manual refresh needed!
 
 ## AI Disclosure
 This plugin was made with the assistance of Claude Code.

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-frontmatter-hider",
-	"version": "0.0.5",
+	"version": "0.1.0",
 	"description": "Toggle frontmatter visibility per note in Obsidian",
 	"main": "main.js",
 	"scripts": {

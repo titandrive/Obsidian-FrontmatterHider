@@ -26,7 +26,6 @@ export default class FrontmatterHiderPlugin extends Plugin {
 	settings: FrontmatterHiderSettings;
 	ribbonIconEl: HTMLElement;
 	private explorerObserver: MutationObserver | null = null;
-	private lastSaveTime: number = 0;
 
 	async onload(): Promise<void> {
 
@@ -55,31 +54,11 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			})
 		);
 
+		// When frontmatter changes (local toggle or cross-device sync), refresh UI
 		this.registerEvent(
-			this.app.metadataCache.on("changed", (file) => {
-				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (view?.file?.path === file.path) {
-					this.updateRibbonIcon();
-				}
-			})
-		);
-
-		this.registerEvent(
-			this.app.vault.on("rename", (file, oldPath) => {
-				if (this.settings.hiddenFiles[oldPath]) {
-					this.settings.hiddenFiles[file.path] = true;
-					delete this.settings.hiddenFiles[oldPath];
-					this.saveSettings();
-				}
-			})
-		);
-
-		this.registerEvent(
-			this.app.vault.on("delete", (file) => {
-				if (this.settings.hiddenFiles[file.path]) {
-					delete this.settings.hiddenFiles[file.path];
-					this.saveSettings();
-				}
+			this.app.metadataCache.on("changed", () => {
+				this.refreshAllLeaves();
+				this.updateRibbonIcon();
 			})
 		);
 
@@ -95,22 +74,13 @@ export default class FrontmatterHiderPlugin extends Plugin {
 				if (filesWithFrontmatter.length === 0) return;
 
 				const allHidden = mdFiles.every(
-					(f) => this.settings.hiddenFiles[f.path] === true
+					(f) => this.isFileHidden(f)
 				);
 				menu.addItem((item) => {
 					item.setTitle(allHidden ? "Show frontmatter" : "Hide frontmatter")
 						.setIcon(allHidden ? ICON_VISIBLE : ICON_HIDDEN)
 						.onClick(async () => {
-							for (const f of mdFiles) {
-								if (allHidden) {
-									delete this.settings.hiddenFiles[f.path];
-								} else {
-									this.settings.hiddenFiles[f.path] = true;
-								}
-							}
-							await this.saveSettings();
-							this.updateRibbonIcon();
-							this.refreshAllLeaves();
+							await this.setFilesHidden(mdFiles, !allHidden);
 						});
 				});
 			})
@@ -128,7 +98,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 				if (filesWithFrontmatter.length === 0) return;
 
 				const allHidden = mdFiles.every(
-					(f) => this.settings.hiddenFiles[f.path] === true
+					(f) => this.isFileHidden(f)
 				);
 
 				menu.addItem((item) => {
@@ -139,16 +109,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 					)
 						.setIcon(allHidden ? ICON_VISIBLE : ICON_HIDDEN)
 						.onClick(async () => {
-							for (const f of mdFiles) {
-								if (allHidden) {
-									delete this.settings.hiddenFiles[f.path];
-								} else {
-									this.settings.hiddenFiles[f.path] = true;
-								}
-							}
-							await this.saveSettings();
-							this.updateRibbonIcon();
-							this.refreshAllLeaves();
+							await this.setFilesHidden(mdFiles, !allHidden);
 						});
 				});
 			})
@@ -159,17 +120,8 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		this.addCommand({
 			id: "toggle-frontmatter-visibility",
 			name: "Toggle frontmatter visibility",
-			checkCallback: (checking: boolean) => {
-				const hasExplorerSelection =
-					this.getExplorerSelectedFiles().length > 0;
-				const hasActiveNote = !!this.getActiveFilePath();
-				if (hasExplorerSelection || hasActiveNote) {
-					if (!checking) {
-						this.toggleFrontmatter();
-					}
-					return true;
-				}
-				return false;
+			callback: () => {
+				this.toggleFrontmatter();
 			},
 		});
 
@@ -178,7 +130,6 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			this.updateRibbonIcon();
 			this.updateRibbonVisibility();
 			this.observeExplorerSelection();
-			this.watchCustomDataFile();
 		});
 	}
 
@@ -187,193 +138,43 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		this.explorerObserver?.disconnect();
 	}
 
-	private static readonly DATA_FILENAME = "frontmatter-hider.json";
-
-	private getCustomFilePath(): string | null {
-		if (!this.settings.customDataPath) return null;
-		return `${this.settings.customDataPath}/${FrontmatterHiderPlugin.DATA_FILENAME}`;
-	}
-
 	async loadSettings(): Promise<void> {
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
-
-		// If custom data path is set, load hiddenFiles from vault file
-		const customFile = this.getCustomFilePath();
-		if (customFile) {
-			try {
-				const exists =
-					await this.app.vault.adapter.exists(customFile);
-				if (exists) {
-					const raw =
-						await this.app.vault.adapter.read(customFile);
-					const data = JSON.parse(raw);
-					if (data && typeof data === "object") {
-						this.settings.hiddenFiles = data;
-					}
-				}
-			} catch {
-				// File missing or invalid JSON — use default empty
-			}
-		}
 	}
 
 	async saveSettings(): Promise<void> {
-		const customFile = this.getCustomFilePath();
-		if (customFile) {
-			// Ensure the directory exists
-			const dir = this.settings.customDataPath;
-			const dirExists = await this.app.vault.adapter.exists(dir);
-			if (!dirExists) {
-				await this.app.vault.adapter.mkdir(dir);
-			}
-			// Track when we save to avoid reloading our own changes
-			this.lastSaveTime = Date.now();
-			console.log("Frontmatter Hider: Saving to custom file", customFile);
-			// Save hiddenFiles to custom vault file
-			await this.app.vault.adapter.write(
-				customFile,
-				JSON.stringify(this.settings.hiddenFiles, null, "\t")
-			);
-			// Save plugin settings (without hiddenFiles) to default data.json
-			const { hiddenFiles, ...rest } = this.settings;
-			await this.saveData(rest);
-		} else {
-			await this.saveData(this.settings);
+		await this.saveData(this.settings);
+	}
+
+	private isFileHidden(file: TFile): boolean {
+		const cache = this.app.metadataCache.getFileCache(file);
+		return cache?.frontmatter?.["frontmatter-hider"] === true;
+	}
+
+	private async setFilesHidden(files: TFile[], hidden: boolean): Promise<void> {
+		for (const file of files) {
+			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				if (hidden) {
+					frontmatter["frontmatter-hider"] = true;
+				} else {
+					delete frontmatter["frontmatter-hider"];
+				}
+			});
 		}
 	}
 
-	private watchCustomDataFile(): void {
-		const customFile = this.getCustomFilePath();
-		if (!customFile) return;
-
-		console.log("Frontmatter Hider: Watching for changes to", customFile);
-
-		// Watch for file modifications
-		this.registerEvent(
-			this.app.vault.on("modify", async (file) => {
-				if (!(file instanceof TFile)) return;
-				if (file.path !== customFile) return;
-
-				console.log("Frontmatter Hider: Detected file modification");
-
-				// Ignore changes we just made ourselves (within 500ms)
-				const timeSinceLastSave = Date.now() - this.lastSaveTime;
-				if (timeSinceLastSave < 500) {
-					console.log("Frontmatter Hider: Ignoring self-made change (saved", timeSinceLastSave, "ms ago)");
-					return;
-				}
-
-				// File was modified by sync from another device - reload it
-				console.log("Frontmatter Hider: Reloading data from synced file");
-				try {
-					const raw = await this.app.vault.adapter.read(customFile);
-					const data = JSON.parse(raw);
-					if (data && typeof data === "object") {
-						this.settings.hiddenFiles = data;
-						this.refreshAllLeaves();
-						this.updateRibbonIcon();
-						console.log("Frontmatter Hider: Successfully reloaded synced data");
-					}
-				} catch (e) {
-					console.error("Frontmatter Hider: Failed to reload synced data", e);
-				}
-			})
-		);
-
-		// Also watch for file creation (in case sync creates it)
-		this.registerEvent(
-			this.app.vault.on("create", async (file) => {
-				if (!(file instanceof TFile)) return;
-				if (file.path !== customFile) return;
-
-				console.log("Frontmatter Hider: Detected file creation from sync");
-				try {
-					const raw = await this.app.vault.adapter.read(customFile);
-					const data = JSON.parse(raw);
-					if (data && typeof data === "object") {
-						this.settings.hiddenFiles = data;
-						this.refreshAllLeaves();
-						this.updateRibbonIcon();
-						console.log("Frontmatter Hider: Loaded data from newly synced file");
-					}
-				} catch (e) {
-					console.error("Frontmatter Hider: Failed to load data from new file", e);
-				}
-			})
-		);
-	}
-
-	async migrateDataFile(
-		oldDir: string,
-		newDir: string
-	): Promise<void> {
-		const data = JSON.stringify(
-			this.settings.hiddenFiles,
-			null,
-			"\t"
-		);
-
-		// Write to new location
-		if (newDir) {
-			const newFile = `${newDir}/${FrontmatterHiderPlugin.DATA_FILENAME}`;
-			const dirExists = await this.app.vault.adapter.exists(newDir);
-			if (dirExists) {
-				// If a file (not folder) exists at this path, remove it first
-				const stat = await this.app.vault.adapter.stat(newDir);
-				if (stat && stat.type === "file") {
-					await this.app.vault.adapter.remove(newDir);
-					await this.app.vault.adapter.mkdir(newDir);
-				}
-			} else {
-				await this.app.vault.adapter.mkdir(newDir);
-			}
-
-			// If the file already exists (e.g. synced from another device),
-			// load from it instead of overwriting
-			if (await this.app.vault.adapter.exists(newFile)) {
-				try {
-					const raw =
-						await this.app.vault.adapter.read(newFile);
-					const existing = JSON.parse(raw);
-					if (existing && typeof existing === "object") {
-						this.settings.hiddenFiles = existing;
-						return;
-					}
-				} catch {
-					// Invalid JSON — overwrite with current data
-				}
-			}
-
-			await this.app.vault.adapter.write(newFile, data);
-		}
-
-		// Clean up old custom file if it existed
-		if (oldDir && oldDir !== newDir) {
-			const oldFile = `${oldDir}/${FrontmatterHiderPlugin.DATA_FILENAME}`;
-			try {
-				if (await this.app.vault.adapter.exists(oldFile)) {
-					await this.app.vault.adapter.remove(oldFile);
-				}
-			} catch {
-				// Ignore cleanup errors
-			}
-		}
-	}
-
-	private getActiveFilePath(): string | null {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!view?.file) return null;
-		return view.file.path;
+	private getActiveFile(): TFile | null {
+		return this.app.workspace.getActiveFile();
 	}
 
 	private isCurrentNoteHidden(): boolean {
-		const path = this.getActiveFilePath();
-		if (!path) return false;
-		return this.settings.hiddenFiles[path] === true;
+		const file = this.getActiveFile();
+		if (!file) return false;
+		return this.isFileHidden(file);
 	}
 
 	private fileHasFrontmatter(file: TFile): boolean {
@@ -382,9 +183,9 @@ export default class FrontmatterHiderPlugin extends Plugin {
 	}
 
 	private activeFileHasFrontmatter(): boolean | null {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!view?.file) return null; // no markdown view active
-		return this.fileHasFrontmatter(view.file);
+		const file = this.getActiveFile();
+		if (!file) return null;
+		return this.fileHasFrontmatter(file);
 	}
 
 	private getExplorerSelectedFiles(): TFile[] {
@@ -415,34 +216,17 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		const explorerFiles = this.getExplorerSelectedFiles();
 		if (explorerFiles.length > 0) {
 			const allHidden = explorerFiles.every(
-				(f) => this.settings.hiddenFiles[f.path] === true
+				(f) => this.isFileHidden(f)
 			);
-			for (const f of explorerFiles) {
-				if (allHidden) {
-					delete this.settings.hiddenFiles[f.path];
-				} else {
-					this.settings.hiddenFiles[f.path] = true;
-				}
-			}
-			await this.saveSettings();
-			this.updateRibbonIcon();
-			this.refreshAllLeaves();
+			await this.setFilesHidden(explorerFiles, !allHidden);
 			return;
 		}
 
 		// Fall back to active note
-		const path = this.getActiveFilePath();
-		if (!path) return;
+		const file = this.getActiveFile();
+		if (!file) return;
 
-		if (this.settings.hiddenFiles[path]) {
-			delete this.settings.hiddenFiles[path];
-		} else {
-			this.settings.hiddenFiles[path] = true;
-		}
-
-		await this.saveSettings();
-		this.updateRibbonIcon();
-		this.refreshAllLeaves();
+		await this.setFilesHidden([file], !this.isFileHidden(file));
 	}
 
 	updateRibbonVisibility(): void {
@@ -458,7 +242,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		if (explorerFiles.length > 0) {
 			disabled = !explorerFiles.some((f) => this.fileHasFrontmatter(f));
 			hidden = explorerFiles.every(
-				(f) => this.settings.hiddenFiles[f.path] === true
+				(f) => this.isFileHidden(f)
 			);
 		} else {
 			const hasFrontmatter = this.activeFileHasFrontmatter();
@@ -503,11 +287,11 @@ export default class FrontmatterHiderPlugin extends Plugin {
 		const view = leaf.view;
 		if (!(view instanceof MarkdownView)) return;
 
-		const filePath = view.file?.path;
+		const file = view.file;
 		const containerEl = view.contentEl;
-		if (!filePath || !containerEl) return;
+		if (!file || !containerEl) return;
 
-		const isHidden = this.settings.hiddenFiles[filePath] === true;
+		const isHidden = this.isFileHidden(file);
 
 		containerEl.classList.remove(...ALL_CLASSES);
 

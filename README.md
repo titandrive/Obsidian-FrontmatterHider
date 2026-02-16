@@ -4,7 +4,7 @@ Frontmatter Hider is a simple Obsidian plugin that lets you toggle frontmatter v
 
 ## How it works
 
-Frontmatter Hider uses CSS to hide frontmatter on individual notes. You can toggle visibility via the ribbon button, right-click context menu, or command palette. When you hide frontmatter on a note, the plugin adds a `frontmatter-hider: true` tag to the note's frontmatter. When you show it again, the tag is removed.
+Frontmatter Hider uses CSS to hide frontmatter on individual notes. You can toggle visibility via the ribbon button, right-click context menu, or command palette. When you hide frontmatter on a note, the plugin adds a `hide_frontmatter: true` tag to the note's frontmatter. When you show it again, the tag is removed.
 
 You can hide frontmatter independently across all three Obsidian view modes:
 - **Source mode**
@@ -57,7 +57,7 @@ Frontmatter Hider works without any configuration. There are only a few settings
 
 ## Cross-Device Sync
 
-Frontmatter Hider works across devices automatically with no setup required. Since the hidden state is stored directly in each note's frontmatter (as `frontmatter-hider: true`), it syncs with your notes using whatever sync method you already use — Obsidian Sync, iCloud, Syncthing, Git, or anything else.
+Frontmatter Hider works across devices automatically with no setup required. Since the hidden state is stored directly in each note's frontmatter (as `hide_frontmatter: true`), it syncs with your notes using whatever sync method you already use — Obsidian Sync, iCloud, Syncthing, Git, or anything else.
 
 ## AI Disclosure
 This plugin was made with the assistance of Claude Code.

@@ -152,16 +152,17 @@ export default class FrontmatterHiderPlugin extends Plugin {
 
 	private isFileHidden(file: TFile): boolean {
 		const cache = this.app.metadataCache.getFileCache(file);
-		return cache?.frontmatter?.["frontmatter-hider"] === true;
+		const value = cache?.frontmatter?.["hide_frontmatter"];
+		return value === true || value === "true";
 	}
 
 	private async setFilesHidden(files: TFile[], hidden: boolean): Promise<void> {
 		for (const file of files) {
 			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 				if (hidden) {
-					frontmatter["frontmatter-hider"] = true;
+					frontmatter["hide_frontmatter"] = true;
 				} else {
-					delete frontmatter["frontmatter-hider"];
+					delete frontmatter["hide_frontmatter"];
 				}
 			});
 		}

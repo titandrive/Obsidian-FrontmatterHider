@@ -26,6 +26,7 @@ export default class FrontmatterHiderPlugin extends Plugin {
 	settings: FrontmatterHiderSettings;
 	ribbonIconEl: HTMLElement;
 	private explorerObserver: MutationObserver | null = null;
+	private currentIconName: string = "";
 
 	async onload(): Promise<void> {
 
@@ -250,7 +251,11 @@ export default class FrontmatterHiderPlugin extends Plugin {
 			disabled = hasFrontmatter === false;
 			hidden = this.isCurrentNoteHidden();
 		}
-		setIcon(this.ribbonIconEl, hidden ? ICON_HIDDEN : ICON_VISIBLE);
+		const iconName = hidden ? ICON_HIDDEN : ICON_VISIBLE;
+		if (iconName !== this.currentIconName) {
+			setIcon(this.ribbonIconEl, iconName);
+			this.currentIconName = iconName;
+		}
 		if (disabled) {
 			this.ribbonIconEl.setAttribute(
 				"aria-label",
